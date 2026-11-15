@@ -1,0 +1,77 @@
+name: Android APK
+
+on:
+  push:
+  workflow_dispatch:
+
+env:
+  GODOT_VERSION: "4.3"
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Cache Godot export templates
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/godot/export_templates
+          key: godot-templates-${{ env.GODOT_VERSION }}
+
+      - name: Install Godot ${{ env.GODOT_VERSION }}
+        run: |
+          base=https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable
+          wget -q "$base/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          unzip -q "Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          mv "Godot_v${GODOT_VERSION}-stable_linux.x86_64" "$RUNNER_TEMP/godot"
+          tdir=~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
+          if [ ! -f "$tdir/android_debug.apk" ]; then
+            wget -q "$base/Godot_v${GODOT_VERSION}-stable_export_templates.tpz"
+            unzip -q "Godot_v${GODOT_VERSION}-stable_export_templates.tpz" -d "$RUNNER_TEMP/tpl"
+            mkdir -p "$tdir"
+            mv "$RUNNER_TEMP"/tpl/templates/* "$tdir/"
+          fi
+
+      - name: Configure Android SDK and debug keystore
+        run: |
+          keytool -keyalg RSA -genkeypair -alias androiddebugkey -keypass android \
+            -keystore "$RUNNER_TEMP/debug.keystore" -storepass android \
+            -dname "CN=Android Debug,O=Android,C=US" -validity 9999 -deststoretype pkcs12
+          mkdir -p ~/.config/godot
+          for f in editor_settings-4.tres editor_settings-${GODOT_VERSION}.tres; do
+            cat > ~/.config/godot/$f <<SETTINGS
+          [gd_resource type="EditorSettings" format=3]
+
+          [resource]
+          export/android/android_sdk_path = "${ANDROID_SDK_ROOT}"
+          export/android/java_sdk_path = "${JAVA_HOME}"
+          export/android/debug_keystore = "${RUNNER_TEMP}/debug.keystore"
+          export/android/debug_keystore_user = "androiddebugkey"
+          export/android/debug_keystore_pass = "android"
+          SETTINGS
+          done
+
+      - name: Import project
+        run: timeout 300 "$RUNNER_TEMP/godot" --headless --import
+
+      - name: Export debug APK
+        env:
+          GODOT_ANDROID_KEYSTORE_DEBUG_PATH: ${{ runner.temp }}/debug.keystore
+          GODOT_ANDROID_KEYSTORE_DEBUG_USER: androiddebugkey
+          GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD: android
+        run: |
+          mkdir -p build
+          "$RUNNER_TEMP/godot" --headless --export-debug "Android" build/BrickBuilder.apk
+          ls -la build
+          test -f build/BrickBuilder.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BrickBuilder-debug-apk
+          path: build/BrickBuilder.apk
