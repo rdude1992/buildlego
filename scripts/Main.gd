@@ -1,19 +1,29 @@
 extends Node3D
-## Game root: sets up the 3D world, the guided build, and switches between menu and build.
+## Game root: 3D world, profile (Kids / Grown-ups), and the flow
+## menu -> box (cut the tape) -> bags (tear one open) -> build -> next bag ... -> complete.
 
 const SET_PATH := "res://sets/house_01.json"
 ## On touchscreens the held piece is shown above the finger so the finger doesn't hide it.
 const TOUCH_LIFT := 80.0
+const SORT_MODES := ["loose", "color", "type"]
 
 var camera: OrbitCamera
 var build: GuidedBuild
 var hud: Hud
 var menu: MainMenu
+var box_screen: BoxScreen
+var gate: ParentalGate
+var sfx: Sfx
 var confetti: CPUParticles3D
-var mode := "menu"
+var mode := "menu" # menu | box | build
+var sort_mode := "color"
+var pending_rot := 0 # Grown-ups: orientation of the next piece picked up
 
 
 func _ready() -> void:
+	Profile.load_profile()
+	sfx = Sfx.new()
+	add_child(sfx)
 	_setup_world()
 	build = GuidedBuild.new()
 	add_child(build)
@@ -23,8 +33,11 @@ func _ready() -> void:
 	_setup_confetti()
 	_setup_ui()
 	build.step_changed.connect(_on_step_changed)
-	build.feedback.connect(_on_feedback)
+	build.feedback.connect(func(text, good): hud.toast(text, good))
 	build.set_completed.connect(_on_completed)
+	build.bag_opened.connect(_on_bag_opened)
+	build.bag_finished.connect(_on_bag_finished)
+	build.placed.connect(_on_placed)
 	show_menu()
 	_run_automation.call_deferred()
 
@@ -103,57 +116,153 @@ func _setup_ui() -> void:
 
 	hud = Hud.new()
 	root.add_child(hud)
-	hud.set_title(build.set_name)
 	hud.menu_pressed.connect(show_menu)
 	hud.hint_pressed.connect(_on_hint)
 	hud.reset_view_pressed.connect(func(): camera.reset_view())
-	hud.rebuild_pressed.connect(start_build)
+	hud.rebuild_pressed.connect(open_box)
 	hud.part_picked.connect(_on_part_picked)
+	hud.turn_pressed.connect(_on_turn)
+	hud.sort_pressed.connect(_on_sort)
 
 	menu = MainMenu.new()
 	root.add_child(menu)
-	menu.set_set_info(build.set_name, build.steps.size())
-	menu.play_pressed.connect(start_build)
+	menu.set_set_info(build.set_name, build.steps.size(), build.bag_count())
+	menu.play_pressed.connect(open_box)
+	menu.mode_chosen.connect(func(m):
+		Profile.set_mode(m)
+		sfx.play("tap")
+		show_menu())
+	menu.switch_mode_pressed.connect(_on_switch_mode)
+
+	box_screen = BoxScreen.new()
+	root.add_child(box_screen)
+	box_screen.visible = false
+	box_screen.set_sfx(sfx)
+	box_screen.back_pressed.connect(show_menu)
+	box_screen.guidance_changed.connect(func(g):
+		Profile.set_guidance(g)
+		sfx.play("tap"))
+	box_screen.tape_cut.connect(func(): box_screen.show_bags(0, build.bag_count(), "Open bag 1"))
+	box_screen.bag_open_requested.connect(_on_bag_open_requested)
+
+	gate = ParentalGate.new()
+	root.add_child(gate)
+	gate.passed.connect(func():
+		Profile.set_mode("adult")
+		show_menu())
 
 	camera.is_ui_point = func(p: Vector2) -> bool:
-		return hud.is_point_over_ui(p) or (menu.visible and menu._panel.get_global_rect().has_point(p))
+		return box_screen.visible or gate.visible or hud.is_point_over_ui(p) \
+			or (menu.visible and menu._panel.get_global_rect().has_point(p))
 
 
-# --- modes -------------------------------------------------------------------
+# --- flow --------------------------------------------------------------------
 
 func show_menu() -> void:
 	mode = "menu"
 	build.cancel_hold()
 	build.show_completed()
 	hud.visible = false
+	box_screen.visible = false
 	menu.visible = true
+	menu.show_for(Profile.is_first_run(), Profile.mode())
 	camera.reset_view()
 	camera.h_offset = -3.2 # keep the model clear of the menu panel
 	camera.auto_rotate = true
 
 
-func start_build() -> void:
-	mode = "build"
+func _on_switch_mode() -> void:
+	if Profile.is_kids():
+		gate.ask() # leaving Kids mode needs a grown-up
+	else:
+		Profile.set_mode("kids")
+		show_menu()
+
+
+## Shows the closed box on an empty table.
+func open_box() -> void:
+	mode = "box"
+	build.cancel_hold()
+	build.restart()
 	menu.visible = false
-	hud.visible = true
-	camera.auto_rotate = false
+	hud.visible = false
 	camera.h_offset = 0.0
 	camera.reset_view()
-	build.restart()
+	camera.auto_rotate = true
+	box_screen.show_box(build.set_name, build.steps, build.bag_count(), Profile.is_kids(), Profile.guidance())
+
+
+func _apply_rules() -> void:
+	var kids := Profile.is_kids()
+	build.guidance = Profile.guidance()
+	build.snap_tolerance = 1 if kids else 0
+	build.auto_rotate = kids
+	sort_mode = "color" if kids else "loose"
+	pending_rot = 0
+	hud.begin_build(build.set_name, build.steps, kids, build.guidance)
+	hud.set_sort_label(sort_mode)
+	hud.set_turn_label(pending_rot)
+
+
+func _on_bag_open_requested(_i: int) -> void:
+	if mode != "build":
+		mode = "build"
+		_apply_rules()
+		camera.auto_rotate = false
+		camera.reset_view()
+	hud.visible = true
+	build.open_next_bag()
+
+
+func _on_bag_opened(i: int) -> void:
+	sfx.play("spill", 0.0, false)
+	_refresh_table(true)
+	hud.toast("Bag %d is open!" % (i + 1), true)
+
+
+func _on_bag_finished(i: int) -> void:
+	sfx.play("fanfare", -8.0, false)
+	await get_tree().create_timer(0.8).timeout
+	if mode == "build" and build.needs_bag():
+		box_screen.show_bags(i + 1, build.bag_count(), "Bag %d done! Open bag %d" % [i + 1, i + 2])
+
+
+func _bag_text() -> String:
+	if build.bag_index < 0:
+		return ""
+	return "Bag %d / %d" % [build.bag_index + 1, build.bag_count()]
 
 
 func _on_step_changed(index: int, total: int) -> void:
-	hud.show_step(index, total, build.current_step(), build.bag_items())
+	if mode != "build":
+		return
+	hud.show_step(index, total, build.current_step(), _bag_text())
+	_refresh_table(false)
 
 
-func _on_feedback(text: String, good: bool) -> void:
-	hud.toast(text, good)
+func _refresh_table(spill: bool) -> void:
+	var items := build.table_items(sort_mode)
+	var n := 0
+	for it in items:
+		n += it["count"]
+	var header := "TABLE  -  %d %s from bag %d. Drag the right piece onto the model." % [n, "piece" if n == 1 else "pieces", build.bag_index + 1]
+	hud.show_table(items, header, spill)
+
+
+func _on_placed(good: bool) -> void:
+	if good:
+		sfx.play("click")
+		Sfx.buzz(18)
+	else:
+		sfx.play("thud")
+		Sfx.buzz(60)
 
 
 func _on_completed() -> void:
 	camera.auto_rotate = true
 	confetti.restart()
 	confetti.emitting = true
+	sfx.play("fanfare", 0.0, false)
 
 
 func _on_hint() -> void:
@@ -161,16 +270,34 @@ func _on_hint() -> void:
 	var s := build.current_step()
 	if not s.is_empty():
 		hud.pulse_card(s["part"], s["color"])
-		hud.toast("Find the %s %s in the bag" % [BrickDefs.color_label(s["color"]), BrickDefs.part_name(s["part"])], true)
+		hud.toast("Find the %s %s on the table" % [BrickDefs.color_label(s["color"]), BrickDefs.part_name(s["part"])], true)
 
 
-# --- dragging a piece from the tray ------------------------------------------
+func _on_turn() -> void:
+	sfx.play("tap")
+	if build.is_holding():
+		build.rotate_held()
+		pending_rot = build.held_rotation()
+	else:
+		pending_rot = (pending_rot + 1) % 4
+	hud.set_turn_label(pending_rot)
+
+
+func _on_sort() -> void:
+	sort_mode = SORT_MODES[(SORT_MODES.find(sort_mode) + 1) % SORT_MODES.size()]
+	hud.set_sort_label(sort_mode)
+	sfx.play("tap")
+	_refresh_table(false)
+
+
+# --- dragging a piece from the table -----------------------------------------
 
 func _on_part_picked(part_id: String, color_id: String) -> void:
-	if mode != "build":
+	if mode != "build" or box_screen.visible:
 		return
-	build.begin_hold(part_id, color_id)
+	build.begin_hold(part_id, color_id, 0 if Profile.is_kids() else pending_rot)
 	camera.input_enabled = false
+	sfx.play("tap", -6.0)
 
 
 func _hold_point(pos: Vector2, from_touch: bool) -> Vector2:
@@ -180,6 +307,11 @@ func _hold_point(pos: Vector2, from_touch: bool) -> Vector2:
 func _input(event: InputEvent) -> void:
 	if not build or not build.is_holding():
 		return
+	# Grown-ups: tap with a second finger while dragging to turn the piece.
+	if event is InputEventScreenTouch and event.pressed and event.index > 0:
+		_on_turn()
+		get_viewport().set_input_as_handled()
+		return
 	if event is InputEventMouseMotion:
 		if hud.is_point_over_ui(event.position):
 			build.hide_preview()
@@ -188,17 +320,18 @@ func _input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 	elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
 		if hud.is_point_over_ui(event.position):
-			build.cancel_hold() # dropped back into the bag
+			build.cancel_hold() # dropped back on the table
 		else:
 			build.end_hold(_hold_point(event.position, event.device == -1))
 		camera.input_enabled = true
 		get_viewport().set_input_as_handled()
 	elif event is InputEventKey and event.pressed and event.keycode == KEY_R:
-		build.rotate_held()
+		_on_turn()
 
 
 # --- automation for screenshots / smoke tests (only with user args) ----------
-# Usage: godot -- --shot=out.png [--scene=menu|build|done] [--steps=N] [--drag]
+# godot -- --shot=out.png --scene=menu|picker|box|bags|build|done [--mode=kids|adult]
+#          [--guidance=guided|booklet] [--steps=N] [--drag] [--hold] [--wrong] [--frames=N]
 
 func _run_automation() -> void:
 	var args := {}
@@ -207,19 +340,39 @@ func _run_automation() -> void:
 		args[kv[0]] = kv[1] if kv.size() > 1 else "1"
 	if args.is_empty():
 		return
+	# Never touch the saved profile from automation.
+	Profile.data = {"mode": args.get("mode", "kids"), "guidance": {}}
+	if args.has("guidance"):
+		Profile.data["guidance"][Profile.mode()] = args["guidance"]
 	var scene: String = args.get("scene", "menu")
-	if scene != "menu":
-		start_build()
-		for i in int(args.get("steps", "0")):
-			build.auto_place_current()
-		if scene == "done":
-			while not build.is_complete():
+	match scene:
+		"picker":
+			Profile.data["mode"] = ""
+			show_menu()
+		"menu":
+			show_menu()
+		"box":
+			open_box()
+		"bags":
+			open_box()
+			await _wait_frames(3)
+			box_screen.cut_tape()
+			await _wait_frames(40)
+		_:
+			open_box()
+			await _wait_frames(3)
+			box_screen.visible = false
+			_on_bag_open_requested(0)
+			for i in int(args.get("steps", "0")):
 				build.auto_place_current()
-	if args.has("drag") and not build.is_complete():
-		await _wait_frames(5)
-		await _simulate_drag()
+			if scene == "done":
+				while not build.is_complete():
+					build.auto_place_current()
+	if args.has("drag") and mode == "build" and not build.is_complete():
+		await _wait_frames(30)
+		await _simulate_drag(args.has("hold"))
 	if args.has("wrong"):
-		await _wait_frames(5)
+		await _wait_frames(30)
 		await _simulate_wrong_drop()
 	await _wait_frames(int(args.get("frames", "45")))
 	if args.has("shot"):
@@ -227,7 +380,8 @@ func _run_automation() -> void:
 		img.save_png(args["shot"])
 		print("Saved screenshot: ", args["shot"])
 	if args.has("report"):
-		print("REPORT step=%d/%d complete=%s" % [build.current, build.steps.size(), build.is_complete()])
+		print("REPORT step=%d/%d bag=%d needs_bag=%s complete=%s table=%s" % [build.current, build.steps.size(),
+			build.bag_index + 1, build.needs_bag(), build.is_complete(), build.table])
 	get_tree().quit()
 
 
@@ -254,28 +408,33 @@ func _send_mouse(pos: Vector2, pressed_state: int) -> void:
 	await get_tree().process_frame
 
 
-## Drags the correct piece from the tray to the ghost, like a player would, then holds it
-## over the target (for the screenshot) and drops it.
-func _simulate_drag() -> void:
+## Drags the correct piece from the table to its spot, like a player would.
+func _simulate_drag(hold: bool) -> void:
 	var s := build.current_step()
-	var card: Control = hud._cards["%s|%s" % [s["part"], s["color"]]]
-	var start := card.get_global_rect().get_center()
-	var target_world := StudGrid.cell_to_world(s["part"], s["cell"], s["rot"]) + Vector3(0, BrickDefs.height(s["part"]), 0)
-	var end := camera.unproject_position(target_world)
+	if not Profile.is_kids():
+		pending_rot = s["rot"]
+		if OS.get_cmdline_user_args().has("--wrongrot"):
+			pending_rot = (s["rot"] + 1) % 4
+		hud.set_turn_label(pending_rot)
+	var start := hud.card_rect(s["part"], s["color"]).get_center()
+	await _wait_frames(2)
+	start = hud.card_rect(s["part"], s["color"]).get_center()
+	# Aim at the surface the brick will rest on, where a player's finger would be.
+	var end := camera.unproject_position(StudGrid.cell_to_world(s["part"], s["cell"], s["rot"]))
 	await _send_mouse(start, 1)
 	for i in 20:
 		await _send_mouse(start.lerp(end, (i + 1) / 20.0), -1)
-	if OS.get_cmdline_user_args().has("--hold"):
+	if hold:
 		return
 	await _send_mouse(end, 0)
 
 
 func _simulate_wrong_drop() -> void:
 	var s := build.current_step()
-	for key in hud._cards:
+	for key in hud.card_keys():
 		if key != "%s|%s" % [s["part"], s["color"]]:
-			var card: Control = hud._cards[key]
-			var start := card.get_global_rect().get_center()
+			var p: PackedStringArray = key.split("|")
+			var start := hud.card_rect(p[0], p[1]).get_center()
 			var end := camera.unproject_position(StudGrid.cell_to_world(s["part"], s["cell"], s["rot"]))
 			await _send_mouse(start, 1)
 			for i in 10:

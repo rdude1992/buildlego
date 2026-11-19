@@ -28,7 +28,7 @@ One app has two modes, chosen on first launch and switchable behind a parental g
 | Scoring | 1 to 3 stars, generous | Stars for no hints, no mistakes, time target |
 | Instructions | Pictures only, no reading needed | Pictures plus step counts and part numbers |
 | UI | Big buttons, 64 px or larger touch targets | Compact, more of the model on screen |
-| Money | No ads; purchases behind a parental gate | Rewarded ads (optional) and set packs |
+| Money | Completely free: limited sets and bricks, no ads, no purchases | Rewarded ads (optional) and set packs |
 
 A family can keep one profile per person on the same phone (up to 4), each with its own mode, collection and progress.
 
@@ -79,7 +79,7 @@ In Booklet mode a wrong placement is not rejected; it stays, like in real life. 
 
 ## Free-build sandbox
 
-The sandbox lets players build anything. Kids mode has unlimited bricks; Adult mode builds only with bricks the player owns, so finishing sets feeds creativity.
+The sandbox lets players build anything. Kids mode has a fixed free palette (about 30 brick types in every color, as many as they like); Adult mode builds only with bricks the player owns, so finishing sets feeds creativity.
 
 - **Brick bank:** every finished set adds its pieces (and spares) to the bank. Adult players can also take apart a finished set from the shelf to free its bricks.
 - **Baseplates:** 16x16, 32x32 and 48x48 studs, in several colors.
@@ -141,14 +141,14 @@ Set files grow from today's step list to include `bags` (which steps belong to e
 
 ## Monetization and kid safety
 
-The game is free with paid set packs, plus optional rewarded ads in Adult mode only. Nothing is pay-to-win, there are no loot boxes, and nothing interrupts a build.
+Kids mode is completely free: a limited set list and brick catalog, with no ads and no purchases. Adult mode is free to start, with paid set packs and optional rewarded ads. Nothing is pay-to-win, there are no loot boxes, and nothing interrupts a build.
 
 ### Revenue sources (proposed prices, USD)
 
 | Source | What the player gets | Price | Mode |
 | --- | --- | --- | --- |
-| Set pack | One theme: 7 to 10 sets plus its parts for the sandbox | $2.99 to $4.99 | Both (Kids: behind parental gate) |
-| Collector's Pass | Every pack released in the next 12 months | $14.99 a year | Both (Kids: behind parental gate) |
+| Set pack | One theme: 7 to 10 sets plus its parts for the sandbox | $2.99 to $4.99 | Adult |
+| Collector's Pass | Every pack released in the next 12 months | $14.99 a year | Adult |
 | Single big set | One large Adult set (800+ pieces) | $1.99 | Adult |
 | Remove ads | Hides the optional ad offers and gives the weekly bonus set for free | $3.99 once | Adult |
 | Rewarded ad | Weekly bonus set, 3 extra hints, or a sandbox brick pack | Free (watch 1 ad) | Adult only |
@@ -157,12 +157,12 @@ The game is free with paid set packs, plus optional rewarded ads in Adult mode o
 
 - **Rewarded only:** the player taps "Watch an ad for..." themselves. No banners, no pop-up (interstitial) ads, never during a build.
 - **Cap:** at most 5 rewarded ads a day.
-- **Kids mode shows no ads at all.** The ad SDK is not even started in a Kids profile.
+- **Kids mode has no ads and no store at all.** The ad SDK is not even started in a Kids profile.
 
 ### Kid safety and compliance
 
 - The app will be listed under Google Play's **Families** program, so it must follow the Families policy and children's privacy laws (COPPA in the US, GDPR-K in the EU).
-- **Parental gate** (a simple adult check, such as typing a written-out number) before any purchase, settings change, sharing or external link in Kids mode.
+- **Parental gate** (a simple adult check, such as typing a written-out number) before switching to Adult mode, changing settings, sharing or opening an external link from Kids mode.
 - No chat, no accounts, no data collection in Kids mode. Analytics in Adult mode are anonymous and can be turned off.
 - Shared photos go only through the phone's own share sheet; the game hosts no public gallery at launch.
 
@@ -214,7 +214,7 @@ Each milestone ends with a playable APK to test on real phones before the next o
 
 - [ ] Final game name (a check that it is free to use on Google Play and as a trademark).
 - [ ] Pack prices: test $2.99 against $4.99 in one country before launch.
-- [ ] Should Kids mode ever show ads (family-certified, non-personalized), or stay ad-free forever?
+- [ ] Kids mode catalog size: which free sets (about 10) and how many brick types (about 30) it includes.
 - [ ] iPhone version: same Godot project; decide after the Android launch.
 - [ ] Who designs the sets: in-house only, or a set editor so players can share builds (milestone M6)?
 - [ ] Art: keep code-generated bricks, or commission a 3D artist for the box art and the town?
