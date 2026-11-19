@@ -12,6 +12,9 @@ All bricks are generated in code, so the project has no external 3D assets.
 | **Wrong piece feedback** | **Set complete** |
 | ![wrong](docs/screenshots/wrong-piece.png) | ![complete](docs/screenshots/complete.png) |
 
+## Game design
+The full game plan (modes, box opening, sandbox, progression, money, roadmap) is in [docs/GAME_DESIGN.md](docs/GAME_DESIGN.md).
+
 ## How to play
 - The **instruction box** (top left) shows the step number and the piece you need.
 - A **glowing ghost brick** shows where that piece goes.
